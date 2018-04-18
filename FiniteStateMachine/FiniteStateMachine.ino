@@ -52,14 +52,17 @@ Pushbutton button(ZUMO_BUTTON);
 
 // And the update function wrapper:
 bool buttonUpdate(void){
-  return !button.isPressed();
+  bool btnPress = button.getSingleDebouncedPress();
+  Serial.print("Button: ");
+  Serial.println(btnPress);
+  return btnPress;
 }
 
 // Ultrasound sensor _______________________________________________________________________________________
 
 // Let's define all the important pins:
 #define TRIGGER_PIN 11
-#define ECHO_PIN 12
+#define ECHO_PIN 2
 
 // The maximum distance for the ultrasonic sensor
 #define MAX_DISTANCE 200
@@ -76,6 +79,8 @@ float pingRead = 0;
 // And the update function:
 float sonarUpdate(void){
   pingRead = (float)sonar.ping_median(5)/ US_ROUNDTRIP_CM; // The calculation done in floating point arithmetic.
+  Serial.print("pingRead: ");
+  Serial.println(pingRead);
   return pingRead;
 }
 
@@ -98,7 +103,7 @@ float sonarUpdate(void){
 
 // Viewed from the back and right to left, the Sensors are attached to the pins:
 QTRSensorsRC qtrrc((unsigned char[]) {QTR1, QTR2, QTR3, QTR4, QTR5, QTR6},
-  NUM_SENSORS, TIMEOUT, EMITTER_PIN);
+  NUM_SENSORS, TIMEOUT);
 
 unsigned int sensorValues[NUM_SENSORS]; // Array to hold the read values.
 
@@ -113,6 +118,11 @@ int QTRUpdate(void){
   }
   return -1;
 }
+
+// Motors ____________________________________________________________________________________________
+
+// Initializes The motors:
+ZumoMotors motors;
 
 // State Machine ____________________________________________________________________________________________
 
@@ -176,11 +186,14 @@ void updateEvent(void){
   if(QTRUpdate() > -1){
     zumoEvent = OnEdge;
   }
-  else if(sonarUpdate() < SONAR_THRESHOLD){
+  else if(buttonUpdate()){
+    zumoEvent = OnButtonPress;
+  }
+  else if(sonarUpdate() < SONAR_THRESHOLD && sonarUpdate() > 0.0){
     zumoEvent = OnFind;
   }
-  else if(buttonUpdate){
-    zumoEvent = OnButtonPress;
+  if(updateIdle()){
+    zumoEvent = On5SecondsPassed;
   }
 }
 
@@ -207,13 +220,45 @@ void doState(void){
   }
 }
 
-// setup() and loop() ________________________________________________________________________________________
+// Timers ____________________________________________________________________________________________________
 
-void setup(){
-  Serial.begin(115200);
+// Some of the states require timers, and some also require similar mechanisms to function properly:
+
+// The five seconds wait in the idle state needs a flag to keep track of start, and firing:
+bool startIdleTimer = false;
+bool stopIdleTimer = false;
+unsigned long long int idleTimer;
+
+// Handles the idleTimer.
+bool updateIdle(void){
+  if (startIdleTimer && millis() >= idleTimer + 5000 && !stopIdleTimer){
+    stopIdleTimer = true;
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+// Both idle and search need a timer to track their actions properly.
+unsigned long long int searchTimer;
+
+// init() function ___________________________________________________________________________________________
+
+// Initializes the components of the robot in the beginning of the setup() function.
+void initialize(){
   pinMode(ZUMO_BUTTON, INPUT);
   zumoState = Start;
   zumoEvent = None;
+  idleTimer = millis();
+  searchTimer = millis();
+}
+
+// setup() and loop() ________________________________________________________________________________________
+
+void setup(){
+  initialize();
+  Serial.begin(115200);
   Serial.print("Event: ");
   Serial.println(zumoEvent);
   Serial.print("State: ");
@@ -236,16 +281,20 @@ void start(void){
  
 }
 void idle(void){
-  delay(5000);
-  zumoEvent = On5SecondsPassed;
+  if(!stopIdleTimer && !startIdleTimer){
+    idleTimer = millis();
+    startIdleTimer = true;
+  }
 }
 void search(void){
-  
+  motors.setSpeeds(-400, 400);
 }
 void chase(void){
-  
+  motors.setSpeeds(400, 400);
 }
 void backUp(void){
-  // Back up motors here.
+  motors.setSpeeds(400, 400);
+  delay(500);
+  zumoEvent = OnSafe;
 }
 
