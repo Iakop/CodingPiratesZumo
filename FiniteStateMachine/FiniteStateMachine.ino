@@ -35,7 +35,7 @@
 // In order to keep track of the states in the FSM, two enums are generated:
 // One for states and one for events.
 // 
-// Then the updating of the state machine is all taken care of by the sensors in the loop function.
+// The sensors are updated internally in the states, so irrelevant sensor input is ignored on a statewise basis.
 // Whenever a sensor meets certain set requirements, the event fires, and the state is updated accordingly.
 //
 // Then the code specific to run in that state runs, until the requirements are met for an event to set
@@ -64,46 +64,68 @@ bool buttonUpdate(void){
 #define TRIGGER_PIN 11
 #define ECHO_PIN 2
 
+// And for the left:
+#define TRIGGER_PIN_LEFT A0
+#define ECHO_PIN_LEFT A1
+// And right:
+#define TRIGGER_PIN_RIGHT A4
+#define ECHO_PIN_RIGHT A5
+
 // The maximum distance for the ultrasonic sensor
-#define MAX_DISTANCE 200
+#define MAX_DISTANCE 100
 // And the threshold for closeness:
-#define SONAR_THRESHOLD 50.0
+#define SONAR_THRESHOLD 30
 
 // Then we instantiate a new object of type NewPing:
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+// And two more for left and right sensing:
+NewPing sonarLeft(TRIGGER_PIN_LEFT, ECHO_PIN_LEFT, MAX_DISTANCE);
+NewPing sonarRight(TRIGGER_PIN_RIGHT, ECHO_PIN_RIGHT, MAX_DISTANCE);
 
 // A variable to hold the read values:
-// Float for higher precision
-float pingRead = 0;
+int pingRead = 0;
+int pingReadLeft = 0;
+int pingReadRight = 0;
 
 // And the update function:
-float sonarUpdate(void){
-  pingRead = (float)sonar.ping_median(5)/ US_ROUNDTRIP_CM; // The calculation done in floating point arithmetic.
+int sonarUpdate(void){
+  pingRead = sonar.ping_median(3) / US_ROUNDTRIP_CM; // The calculation done in floating point arithmetic.
   Serial.print("pingRead: ");
   Serial.println(pingRead);
   return pingRead;
+}
+// Plus left/right variants:
+int sonarUpdateLeft(void){
+  pingReadLeft = sonarLeft.ping_median(3) / US_ROUNDTRIP_CM; // The calculation done in floating point arithmetic.
+  Serial.print("pingReadLeft: ");
+  Serial.println(pingReadLeft);
+  return pingReadLeft;
+}
+int sonarUpdateRight(void){
+  pingReadRight = sonarRight.ping_median(3) / US_ROUNDTRIP_CM; // The calculation done in floating point arithmetic.
+  Serial.print("pingReadRight: ");
+  Serial.println(pingReadRight);
+  return pingReadRight;
 }
 
 // QTR Sensors _____________________________________________________________________________________________
 
 // Firstly, some important pins:
-#define NUM_SENSORS 6     // Number of sensors used
+#define NUM_SENSORS 4 //6    // Number of sensors used - 2 in this case, as we don't want to waste time on the others.
 #define TIMEOUT 500  // The maximum amount of time to wait, before the sensors stop waiting.
-#define EMITTER_PIN 2     // Emitter is unused, but mapped to pin 2.
 #define QTR1 4
 #define QTR2 A3
-#define QTR3 11
-#define QTR4 A0
+//#define QTR3 11
+//#define QTR4 A0
 #define QTR5 A2
 #define QTR6 5
 
 // Then the threshhold light value.
 // lightersurface = lower number. The threshhold for whit surface is around 200.
-#define QTRTHRESHOLD 200
+#define QTRTHRESHOLD 300
 
 // Viewed from the back and right to left, the Sensors are attached to the pins:
-QTRSensorsRC qtrrc((unsigned char[]) {QTR1, QTR2, QTR3, QTR4, QTR5, QTR6},
-  NUM_SENSORS, TIMEOUT);
+QTRSensorsRC qtrrc((unsigned char[]) {QTR1, QTR2, /*QTR3, QTR4,*/ QTR5, QTR6}, NUM_SENSORS, TIMEOUT);
 
 unsigned int sensorValues[NUM_SENSORS]; // Array to hold the read values.
 
@@ -124,11 +146,20 @@ int QTRUpdate(void){
 // Initializes The motors:
 ZumoMotors motors;
 
+// Constants to set the motor speeds:
+#define REVERSE_SPEED     400 
+#define TURN_SPEED        300
+#define FORWARD_SPEED     400
+#define SEARCH_SPEED      200
+// Duration of backing, and turn:
+#define REVERSE_DURATION  200 // ms
+#define TURN_DURATION     300 // ms
+
 // State Machine ____________________________________________________________________________________________
 
 // First, the states and events are enumerated:
-enum States { Start, Idle, Search, Chase, BackUp };
-enum Events { None, OnButtonPress, On5SecondsPassed, OnFind, OnEdge, OnSafe };
+enum States { Start, Idle, Search, Chase, BackUp, TurnLeft, TurnRight };
+enum Events { None, OnButtonPress, On5SecondsPassed, OnFind, OnEdge, OnSafe, OnLost, OnLeft, OnRight };
 
 // Then the variables to hold the states themselves are defined:
 static enum States zumoState = Start;
@@ -162,6 +193,12 @@ void updateState(void){
       if(zumoState == Search){
         zumoState = Chase;
       }
+      if(zumoState == TurnLeft){
+        zumoState = Chase;
+      }
+      if(zumoState == TurnRight){
+        zumoState = Chase;
+      }
       break;
     case OnEdge:
       if(zumoState == Search){
@@ -170,10 +207,31 @@ void updateState(void){
       if(zumoState == Chase){
         zumoState = BackUp;
       }
+      if(zumoState == TurnLeft){
+        zumoState = BackUp;
+      }
+      if(zumoState == TurnRight){
+        zumoState = BackUp;
+      }
       break;
     case OnSafe:
       if(zumoState == BackUp){
         zumoState = Search;
+      }
+      break;
+    case OnLost:
+      if(zumoState == Chase){
+        zumoState = Search;
+      }
+      break;
+    case OnLeft:
+      if(zumoState == Search){
+        zumoState = TurnLeft;
+      }
+      break;
+    case OnRight:
+      if(zumoState == Search){
+        zumoState = TurnRight;
       }
       break;
     default:
@@ -183,18 +241,7 @@ void updateState(void){
 
 // This loops, and checks all the sensors, to update the events, and thus change states:
 void updateEvent(void){
-  if(QTRUpdate() > -1){
-    zumoEvent = OnEdge;
-  }
-  else if(buttonUpdate()){
-    zumoEvent = OnButtonPress;
-  }
-  else if(sonarUpdate() < SONAR_THRESHOLD && sonarUpdate() > 0.0){
-    zumoEvent = OnFind;
-  }
-  if(updateIdle()){
-    zumoEvent = On5SecondsPassed;
-  }
+  
 }
 
 // This maps the states to the proper state-exclusives functionality:
@@ -214,6 +261,12 @@ void doState(void){
       break;
     case BackUp:
       backUp();
+      break;
+    case TurnLeft:
+      turnLeft();
+      break;
+    case TurnRight:
+      turnRight();
       break;
     default:
       break;
@@ -241,7 +294,7 @@ bool updateIdle(void){
 }
 
 // Both idle and search need a timer to track their actions properly.
-unsigned long long int searchTimer;
+unsigned long long int otteTalsTimer;
 
 // init() function ___________________________________________________________________________________________
 
@@ -251,7 +304,7 @@ void initialize(){
   zumoState = Start;
   zumoEvent = None;
   idleTimer = millis();
-  searchTimer = millis();
+  otteTalsTimer = millis();
 }
 
 // setup() and loop() ________________________________________________________________________________________
@@ -259,42 +312,184 @@ void initialize(){
 void setup(){
   initialize();
   Serial.begin(115200);
-  Serial.print("Event: ");
+  /*Serial.print("Event: ");
   Serial.println(zumoEvent);
   Serial.print("State: ");
-  Serial.println(zumoState);
+  Serial.println(zumoState);*/
 }
 
 void loop(){
   updateEvent();
-  Serial.print("Event: ");
-  Serial.println(zumoEvent);
+  /*Serial.print("Event: ");
+  Serial.println(zumoEvent);*/
   updateState();
-  Serial.print("State: ");
-  Serial.println(zumoState);
+  /*Serial.print("State: ");
+  Serial.println(zumoState);*/
   doState();
 }
 
 // The state functions _______________________________________________________________________________________
 
 void start(void){
- 
+  if(buttonUpdate()){
+    zumoEvent = OnButtonPress;
+  }
 }
+
 void idle(void){
+  // Starts the idle timer once, to count down the time.
   if(!stopIdleTimer && !startIdleTimer){
     idleTimer = millis();
     startIdleTimer = true;
   }
+  // When both stopIdleTimer and startIdletimer turn true, the time has gone by,
+  // and the updateIdle() function fires the new event.
+  if(updateIdle()){
+    zumoEvent = On5SecondsPassed;
+    return;
+  }
 }
+
 void search(void){
-  motors.setSpeeds(-400, 400);
+  // Set the speeds counter each other for left and right, to spin:
+  /*if(otteTal() == -1){
+      zumoEvent = OnEdge;
+      return; // Instantly return, to not waste any time.
+  }*/
+  
+  
+  // Update QTR for edge detection, to fire OnEdge as fast as possible.
+  if(QTRUpdate() > -1){
+    zumoEvent = OnEdge;
+    return; // Instantly return, to not waste any time.
+  }
+  motors.setSpeeds(SEARCH_SPEED/2, SEARCH_SPEED);
+  /*
+  unsigned long long int millisRead = millis();  
+  if (millisRead > otteTalsTimer && millisRead < otteTalsTimer + 1000){
+    motors.setSpeeds(400 , 125);
+  }
+  else if (millisRead > otteTalsTimer + 1000 && millisRead < otteTalsTimer + 4000){
+    motors.setSpeeds(125 , 400);
+  }
+  else if (millisRead > otteTalsTimer + 4000 && millisRead < otteTalsTimer + 6000){
+    motors.setSpeeds(400 , 125);
+  }
+  else{
+    otteTalsTimer = millis();
+  }*/
+
+  int sonarRead = sonarUpdate();
+  int sonarReadLeft = sonarUpdateLeft();
+  int sonarReadRight = sonarUpdateRight();
+  // If no edge is seen, check for the opponent:
+  if(sonarRead < SONAR_THRESHOLD && sonarRead > 0){
+    motors.setSpeeds(0, 0);
+    delay(50);
+    zumoEvent = OnFind;
+    return;
+  }
+  // Check for the opponent on left:
+  else if(sonarReadLeft < SONAR_THRESHOLD && sonarReadLeft > 0){
+    zumoEvent = OnLeft;
+    return;
+  }
+  // Check for the opponent on Right:
+  else if(sonarReadRight < SONAR_THRESHOLD && sonarReadRight > 0){
+    zumoEvent = OnRight;
+    return;
+  }
 }
+
 void chase(void){
-  motors.setSpeeds(400, 400);
+  motors.setSpeeds(FORWARD_SPEED, FORWARD_SPEED);
+  // Update QTR for edge detection, to fire OnEdge as fast as possible.
+  if(QTRUpdate() > -1){
+    zumoEvent = OnEdge;
+    return; // Instantly return, to not waste any time.
+  }
 }
+
 void backUp(void){
-  motors.setSpeeds(400, 400);
-  delay(500);
+  if(sensorValues[0] < sensorValues[NUM_SENSORS-1]){
+    motors.setSpeeds(-REVERSE_SPEED, -REVERSE_SPEED/2);
+    delay(REVERSE_DURATION);
+    motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
+    delay(TURN_DURATION);
+  }
+  if(sensorValues[0] > sensorValues[NUM_SENSORS-1]){
+    motors.setSpeeds(-REVERSE_SPEED/2, -REVERSE_SPEED);
+    delay(REVERSE_DURATION);
+    motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
+    delay(TURN_DURATION);
+  }
+  else{
+    motors.setSpeeds(-REVERSE_SPEED, -REVERSE_SPEED);
+    delay(REVERSE_DURATION);
+    motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
+    delay(TURN_DURATION);
+  }
   zumoEvent = OnSafe;
+}
+
+void turnLeft(void){
+  motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
+  // check for the opponent:
+  
+  // Update QTR for edge detection, to fire OnEdge as fast as possible.
+  if(QTRUpdate() > -1){
+    zumoEvent = OnEdge;
+    return; // Instantly return, to not waste any time.
+  }
+  int sonarRead = sonarUpdate();
+  // If no edge is seen, check for the opponent:
+  if(sonarRead < SONAR_THRESHOLD && sonarRead > 0){
+    motors.setSpeeds(0, 0);
+    delay(50);
+    zumoEvent = OnFind;
+    return;
+  }
+}
+
+void turnRight(void){
+  motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
+  // check for the opponent:
+  
+  // Update QTR for edge detection, to fire OnEdge as fast as possible.
+  if(QTRUpdate() > -1){
+    zumoEvent = OnEdge;
+    return; // Instantly return, to not waste any time.
+  }
+
+  int sonarRead = sonarUpdate();
+  // If no edge is seen, check for the opponent:
+  if(sonarRead < SONAR_THRESHOLD && sonarRead > 0){
+    motors.setSpeeds(0, 0);
+    delay(50);
+    zumoEvent = OnFind;
+    return;
+  }
+}
+
+int otteTal(void){
+  // Update QTR for edge detection, to fire OnEdge as fast as possible.
+  if(QTRUpdate() > -1){
+    return -1; // Instantly return, to not waste any time.
+  }
+
+  unsigned long long int millisRead = millis();  
+  if (millisRead > otteTalsTimer && millisRead < otteTalsTimer + 1000){
+    motors.setSpeeds(400 , 125);
+  }
+  else if (millisRead > otteTalsTimer + 1000 && millisRead < otteTalsTimer + 4000){
+    motors.setSpeeds(125 , 400);
+  }
+  else if (millisRead > otteTalsTimer + 4000 && millisRead < otteTalsTimer + 6000){
+    motors.setSpeeds(400 , 125);
+  }
+  else{
+    otteTalsTimer = millis();
+  }
+  return 0;
 }
 
