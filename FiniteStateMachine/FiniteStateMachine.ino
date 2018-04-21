@@ -5,31 +5,31 @@
 // Purpose:
 // To give our Zumo Robots a model, by which to reaact to the opposing robots.
 // The flowchart, that illustrates the FSM is as follows:
-//                       _____
-//                      |     |
-//                      |Start|
-//                      |_____|
-//                         |
-//                    OnButtonPress
-//                         |
-//                      ___v__
-//                     |      |
-//                     | Idle |
-//                     |______|
-//                         |
-//                  On5SecondsPassed
-//                         |
-//                     ____v___
-//                    |        |
-//          --OnFind--| Search |<----
-//         |          |________|     |
-//      ___v___            |         |
-//     |       |         OnEdge   OnSafe
-//     | Chase |           |         |
-//     |_______|       ____v___      |
-//         |          |        |     |
-//       OnEdge------>| BackUp |-----     
-//                    |________|
+//                         _____
+//                        |     |
+//                        |Start|
+//                        |_____|
+//                           |
+//                      OnButtonPress
+//                           |
+//                        ___v__
+//                       |      |
+//                       | Idle |
+//                       |______|
+//                           |
+//                    On5SecondsPassed
+//   ______                  |
+//  |  L/R |<--OnRight--|____v___
+//  | Turn |<--OnLeft---|        |
+//  |______|- --OnFind--| Search |<----
+//           |          |________|     |
+//        ___v___            |         |
+//       |       |         OnEdge   OnSafe
+//       | Chase |           |         |
+//       |_______|       ____v___      |
+//           |          |        |     |
+//         OnEdge------>| BackUp |-----     
+//                      |________|
 //
 // Method:
 // In order to keep track of the states in the FSM, two enums are generated:
