@@ -74,7 +74,7 @@ bool buttonUpdate(void){
 // The maximum distance for the ultrasonic sensor
 #define MAX_DISTANCE 100
 // And the threshold for closeness:
-#define SONAR_THRESHOLD 30
+#define SONAR_THRESHOLD 50
 
 // Then we instantiate a new object of type NewPing:
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
@@ -147,19 +147,22 @@ int QTRUpdate(void){
 ZumoMotors motors;
 
 // Constants to set the motor speeds:
-#define REVERSE_SPEED     400 
+#define REVERSE_SPEED     300 
 #define TURN_SPEED        300
 #define FORWARD_SPEED     400
-#define SEARCH_SPEED      200
+#define SEARCH_SPEED      300
 // Duration of backing, and turn:
 #define REVERSE_DURATION  200 // ms
 #define TURN_DURATION     300 // ms
 
+// The time to wait in the beginning.
+#define IDLETIME 3000
+
 // State Machine ____________________________________________________________________________________________
 
 // First, the states and events are enumerated:
-enum States { Start, Idle, Search, Chase, BackUp, TurnLeft, TurnRight };
-enum Events { None, OnButtonPress, On5SecondsPassed, OnFind, OnEdge, OnSafe, OnLost, OnLeft, OnRight };
+enum States { Start, Idle, Search, Chase, BackUp, TurnLeft, TurnRight, FindBorder };
+enum Events { None, OnButtonPress, On5SecondsPassed, OnFind, OnEdge, OnSafe, OnLost, OnLeft, OnRight, OnBorderFind };
 
 // Then the variables to hold the states themselves are defined:
 static enum States zumoState = Start;
@@ -186,7 +189,7 @@ void updateState(void){
       break;
     case On5SecondsPassed:
       if(zumoState == Idle){
-        zumoState = Search;
+        zumoState = FindBorder;
       }
       break;
     case OnFind:
@@ -234,6 +237,11 @@ void updateState(void){
         zumoState = TurnRight;
       }
       break;
+    case OnBorderFind:
+      if(zumoState == FindBorder){
+        zumoState = Search;
+      }
+      break;
     default:
       break;
   }
@@ -268,6 +276,9 @@ void doState(void){
     case TurnRight:
       turnRight();
       break;
+    case FindBorder:
+      findBorder();
+      break;
     default:
       break;
   }
@@ -284,7 +295,7 @@ unsigned long long int idleTimer;
 
 // Handles the idleTimer.
 bool updateIdle(void){
-  if (startIdleTimer && millis() >= idleTimer + 5000 && !stopIdleTimer){
+  if (startIdleTimer && millis() >= idleTimer + IDLETIME && !stopIdleTimer){
     stopIdleTimer = true;
     return true;
   }
@@ -417,7 +428,7 @@ void backUp(void){
     motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
     delay(TURN_DURATION);
   }
-  if(sensorValues[0] > sensorValues[NUM_SENSORS-1]){
+  else if(sensorValues[0] > sensorValues[NUM_SENSORS-1]){
     motors.setSpeeds(-REVERSE_SPEED/2, -REVERSE_SPEED);
     delay(REVERSE_DURATION);
     motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
@@ -469,6 +480,16 @@ void turnRight(void){
     zumoEvent = OnFind;
     return;
   }
+}
+
+void findBorder(void){
+  motors.setSpeeds(250, 250);
+  while(QTRUpdate() <= -1);
+  motors.setSpeeds(-50, -50);
+  delay(50);
+  motors.setSpeeds(400, -400);
+  delay(300);
+  zumoEvent = OnBorderFind;
 }
 
 int otteTal(void){
